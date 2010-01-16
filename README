@@ -1,4 +1,4 @@
-ical2pcal v0.0.1 - Convert iCalendar (.ics) data files to pcal data files  
+ical2pcal v0.0.2 - Convert iCalendar (.ics) data files to pcal data files  
 
 Usage:   ical2pcal  [-E] [-o <file>] [-h] file 
          
@@ -19,8 +19,6 @@ the event, the rest information of the event like
 description or location are commented in the pcal file (because
 usually this information does not fit in the day box).
 
-Currently the event's time is only true if the event is in your time
-zone (be carefully about this).
+Currently automatic detection and conversion to local time of time values 
+in UTC is implemented. All other time values are assumed as local times.
 
-Please email me to report bugs, suggestions or simply correct my crappy
-English to pacogeek+ical2pcal@gmail.com 
