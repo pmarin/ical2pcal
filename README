@@ -1,0 +1,26 @@
+ical2pcal v0.0.1 - Convert iCalendar (.ics) data files to pcal data files  
+
+Usage:   ical2pcal  [-E] [-o <file>] [-h] file 
+         
+         -E Use European date format (dd/mm/yyyy)
+
+         -o <file> Write the output to file instead of to stdout 
+         
+         -h Display this help
+
+The iCalendar format (.ics file extension) is a standard (RFC 2445)
+for calendar data exchange. Programs that support the iCalendar format
+are: Google Calendar, Apple iCal, Evolution, Orange, etc.
+
+The iCalendar format have many objects like events, to-do lists,
+alarms, journal entries etc. ical2pcal only use the events
+in the file showing in the pcal file the summary and the time of
+the event, the rest information of the event like
+description or location are commented in the pcal file (because
+usually this information does not fit in the day box).
+
+Currently the event's time is only true if the event is in your time
+zone (be carefully about this).
+
+Please email me to report bugs, suggestions or simply correct my crappy
+English to pacogeek+ical2pcal@gmail.com 
