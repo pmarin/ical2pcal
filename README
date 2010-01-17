@@ -22,3 +22,5 @@ usually this information does not fit in the day box).
 Currently automatic detection and conversion to local time of time values 
 in UTC is implemented. All other time values are assumed as local times.
 
+ical2pcal does not support repeating events, like every first sunday in month.
+
