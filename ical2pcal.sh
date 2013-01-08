@@ -24,6 +24,15 @@
 #THE SOFTWARE.
 
 # Changes from Jörg Kühne
+#v0.0.4
+# - support of excluded dates in a simple series of repeating events
+
+#v0.0.3
+# - support of simple repeating events like:
+#   every n-th [day|week|month|year] from <DATE> until <DATE>
+#   but not like:
+#   every first sunday in month
+
 # v0.0.2:
 # - auto conversion from UTC times to local times
 # - support of multiple day events
@@ -53,31 +62,32 @@ fi
 
 help() { # Show the help 
    cat << EOF
-ical2pcal v0.0.2 - Convert iCalendar (.ics) data files to pcal data files  
+ical2pcal v0.0.4 - Convert iCalendar (.ics) data files to pcal data files
 
-Usage:   ical2pcal  [-E] [-o <file>] [-h] file 
-         
+Usage:   ical2pcal  [-E] [-o <file>] [-h] file
+
          -E Use European date format (dd/mm/yyyy)
 
-         -o <file> Write the output to file instead of to stdout 
-         
+         -o <file> Write the output to file instead of to stdout
+
          -h Display this help
 
-The iCalendar format (.ics file extension) is a standard (RFC 2445)
-for calendar data exchange. Programs that support the iCalendar format
-are: Google Calendar, Apple iCal, Evolution, Orange, etc.
+The iCalendar format (.ics file extension) is a standard (RFC 2445) for
+calendar data exchange. Programs that support the iCalendar format are: Google
+Calendar, Apple iCal, Evolution, Orange, etc.
 
-The iCalendar format have many objects like events, to-do lists,
-alarms, journal entries etc. ical2pcal only use the events
-in the file showing in the pcal file the summary and the time of
-the event, the rest information of the event like
-description or location are commented in the pcal file (because
+The iCalendar format have many objects like events, to-do lists, alarms,
+journal entries etc. ical2pcal only use the events in the file showing in the
+pcal file the summary and the time of the event, the rest information of the
+event like description or location are commented in the pcal file (because
 usually this information does not fit in the day box).
 
-Currently automatic detection and conversion to local time of time values 
-in UTC is implemented. All other time values are assumed as local times.
+Currently automatic detection and conversion to local time of time values in
+UTC is implemented. All other time values are assumed as local times.
 
-ical2pcal does not support repeating events, like every first sunday in month.
+ical2pcal does not support complex repeating events, like every first sunday in
+month. Only simple recurrence are allowed like:
+every n-th [day|week|month|year] from <DATE> until <DATE> except <DATE>,...
 
 EOF
 }
@@ -109,7 +119,7 @@ then
    exit 0
 fi
 
-cat $* |
+cat "$*" |
 awk '
 BEGIN{
    RS = ""
@@ -137,8 +147,23 @@ $0 ~ /^BEGIN:VEVENT/ {
    all_day_event = 0
    utc_time = 0
    summary = ""
-   localtion = ""
+   location = ""
    description = ""
+
+   repeat = 1
+   repeating_event = 0
+   frequency =""
+   interval = 1
+   max_num_repetitions = 750
+   repeating_end_date = ""
+   date_incr_str = "week"
+   debug_repeat_str = ""
+   # empty exdates array
+   for (i in exdates)
+   {
+      delete exdates[i]
+   }
+   exdates_index = 0
 
    while ($0 !~ /^END:VEVENT/)
    {
@@ -188,6 +213,7 @@ $0 ~ /^BEGIN:VEVENT/ {
          sub(/^:/,"",$0)
          summary = $0
       }
+
       if ($1 ~ /^LOCATION/)
       {
          sub(/LOCATION/,"",$0)
@@ -201,9 +227,111 @@ $0 ~ /^BEGIN:VEVENT/ {
          sub(/^:/,"",$0)
          description = $0
       }
+
+      if ($1 ~ /^RRULE/)
+      {
+         debug_repeat_str = $0
+         sub(/RRULE/,"",$0)
+         sub(/^:/,"",$0)
+         split($0,part,";")
+         for (i in part)
+         {
+            numparts = split(part[i],subpart,"=")
+
+            if (numparts > 1)
+            {
+               if (subpart[1] ~ /FREQ/)
+               {
+                  frequency = subpart[2]
+               }
+
+               if (subpart[1] ~ /INTERVAL/)
+               {
+                  interval = subpart[2]
+               }
+
+               if (subpart[1] ~ /UNTIL/)
+               {
+                  until_year = substr(subpart[2], 1, 4)
+                  until_month = substr(subpart[2], 5, 2)
+                  until_day = substr(subpart[2], 7, 2)
+                  until_hour = substr(subpart[2], 10, 2)
+                  until_minute = substr(subpart[2], 12, 2)
+                  until_UTCTAG = substr(subpart[2], 16, 1)
+
+                  if (until_UTCTAG == "Z")
+                  {
+                     tmp_repeating_end_date = until_year until_month until_day "UTC" until_hour until_minute
+                     command = date_command " -d" tmp_repeating_end_date " +%Y%m%d%H%M"
+                     command | getline captureresult
+                     close(command)
+                     until_year = substr(captureresult, 1, 4)
+                     until_month = substr(captureresult, 5, 2)
+                     until_day = substr(captureresult, 7, 2)
+                  }
+
+                  repeating_end_date = until_year until_month until_day
+               }
+            }
+         }
+
+         if (frequency == "DAILY")
+         {
+            repeating_event = 1
+            max_num_repetitions = 750
+            date_incr_str = "day"
+         }
+         if (frequency == "WEEKLY")
+         {
+            repeating_event = 1
+            max_num_repetitions = 260
+            date_incr_str = "week"
+         }
+         if (frequency == "MONTHLY")
+         {
+            repeating_event = 1
+            max_num_repetitions = 60
+            date_incr_str = "month"
+         }
+         if (frequency == "YEARLY")
+         {
+            repeating_event = 1
+            max_num_repetitions = 5
+            date_incr_str = "year"
+         }
+      }
+
+      if ($1 ~ /^EXDATE/)
+      {
+         split($2,part,",")
+         for (i in part)
+         {
+            year_exdate = substr(part[i], 1, 4)
+            month_exdate = substr(part[i], 5, 2)
+            day_exdate = substr(part[i], 7, 2)
+            hour_exdate = substr(part[i], 10, 2)
+            minute_exdate = substr(part[i], 12, 2)
+            UTCTAG = substr(part[i], 16, 1)
+
+            if (UTCTAG == "Z")
+            {
+               tmp_exdate = year_exdate month_exdate day_exdate "UTC" hour_exdate minute_exdate
+               command = date_command " -d" tmp_exdate " +%Y%m%d%H%M"
+               command | getline captureresult
+               close(command)
+               year_exdate = substr(captureresult, 1, 4)
+               month_exdate = substr(captureresult, 5, 2)
+               day_exdate = substr(captureresult, 7, 2)               
+            }
+
+            tmp_exdate = year_exdate month_exdate day_exdate
+            exdates[exdates_index] = tmp_exdate
+            exdates_index = exdates_index + 1
+         }
+      }
+
       getline
    }
-   print "#### BEGIN EVENT -----------------------------------"
 
    if (! all_day_event && utc_time)
    {
@@ -234,7 +362,7 @@ $0 ~ /^BEGIN:VEVENT/ {
    date_end = year_end month_end day_end
 
    # avoid new day entry if end time is 12AM
-   if (hour_end == "00" && minute_end == "00")
+   if (! all_day_event && hour_end == "00" && minute_end == "00")
    {
       command = date_command "  -d \"" date_end " -1 day\"" " +%Y%m%d"
       command | getline captureresult
@@ -246,165 +374,236 @@ $0 ~ /^BEGIN:VEVENT/ {
       date_end = year_end month_end day_end
    }
 
-   if (all_day_event)
+   if (summary == "")
    {
-      # Hack to save calculation time - not works for last day of month
-      if (date_start + 1 == date_end)
-      {
-         if (european_format)
-         {
-         print day_start "/" month_start "/" year_start " " summary
-         }
-         else
-         {
-         print month_start "/" day_start "/" year_start " " summary
-         }
-      }
-      else
-      {
-         if (date_start < date_end) 
-         {
-            date_next = date_start
-            while (date_next < date_end)
-            {
-               tmp_year_next = substr(date_next, 1, 4)
-               tmp_month_next = substr(date_next, 5, 2)
-               tmp_day_next = substr(date_next, 7, 2)
+      next
+   }
 
+   print "#### BEGIN EVENT -----------------------------------"
+   if (debug_repeat_str != "")
+   {
+      print "#"debug_repeat_str
+   }
+   if (exdates_index > 0)
+   {
+      for (i in exdates)
+      {
+         print "#EXDATE:" exdates[i]
+      }
+   }
+
+   num_repetitions = 0
+   while (repeat == 1 && num_repetitions < max_num_repetitions)
+   {
+      date_start_bak = date_start
+      date_end_bak = date_end
+
+      # check for excluded dates
+      exdate = 0
+      for (i in exdates)
+      {
+         if (exdates[i] == date_start)
+         {
+            exdate = 1
+            break
+         }
+      }      
+
+      if (exdate == 0)
+      {
+         if (all_day_event)
+         {
+            # Hack to save calculation time - not works for last day of month
+            if (date_start + 1 == date_end)
+            {
                if (european_format)
                {
-                print tmp_day_next "/" tmp_month_next "/" tmp_year_next " " summary
+               print day_start "/" month_start "/" year_start " " summary
                }
                else
                {
-                print tmp_month_next "/" tmp_day_next "/" tmp_year_next " " summary
+               print month_start "/" day_start "/" year_start " " summary
+               }
+            }
+            else
+            {
+               if (date_start < date_end) 
+               {
+                  date_next = date_start
+                  while (date_next < date_end)
+                  {
+                     tmp_year_next = substr(date_next, 1, 4)
+                     tmp_month_next = substr(date_next, 5, 2)
+                     tmp_day_next = substr(date_next, 7, 2)
+
+                     if (european_format)
+                     {
+                     print tmp_day_next "/" tmp_month_next "/" tmp_year_next " " summary
+                     }
+                     else
+                     {
+                     print tmp_month_next "/" tmp_day_next "/" tmp_year_next " " summary
+                     }
+
+                     command = date_command  " -d \"" date_next " 1 day\"" " +%Y%m%d"
+                     command | getline captureresult
+                     close(command)
+                     date_next = captureresult
+                  }
+               }
+               else
+               {
+                  # Should not happen
+                  if (european_format)
+                  {
+                     print day_start "/" month_start "/" year_start " " summary
+                  }
+                  else
+                  {
+                     print month_start "/" day_start "/" year_start " " summary
+                  }
+               }
+            }
+         }
+         else
+         {
+            if (date_start < date_end) 
+            {
+               # first date with start time
+               if (european_format)
+               {
+                  print day_start "/" month_start "/" year_start " " hour_start ":" minute_start " -> " summary
+               }
+               else
+               {
+                  command = date_command " -d " hour_start ":" minute_start " +%I:%M%p"
+                  command | getline time_start
+                  close(command)
+
+                  print month_start "/" day_start "/" year_start " " time_start " -> " summary
                }
 
-               command = date_command  " -d \"" date_next " 1 day\"" " +%Y%m%d"
+               #middle days without time
+               command = date_command  " -d \"" date_start " 1 day\"" " +%Y%m%d"
                command | getline captureresult
                close(command)
                date_next = captureresult
-            }
-         }
-         else
-         {
-            # Should not happen
-            if (european_format)
-            {
-               print day_start "/" month_start "/" year_start " " summary
+               while (date_next < date_end)
+               {
+                  tmp_year_next = substr(date_next, 1, 4)
+                  tmp_month_next = substr(date_next, 5, 2)
+                  tmp_day_next = substr(date_next, 7, 2)
+
+                  if (european_format)
+                  {
+                     print tmp_day_next "/" tmp_month_next "/" tmp_year_next " " summary
+                  }
+                  else
+                  {
+                     print tmp_month_next "/" tmp_day_next "/" tmp_year_next " " summary
+                  }
+
+                  command = date_command " -d \"" date_next " 1 day\"" " +%Y%m%d"
+                  command | getline captureresult
+                  close(command)
+                  date_next = captureresult
+               }
+
+               # last day with end time
+               if (european_format)
+               {
+                  print day_end "/" month_end "/" year_end " -> " hour_end ":" minute_end " " summary
+               }
+               else
+               {
+                  command = date_command " -d " hour_end ":" minute_end " +%I:%M%p"
+                  command | getline time_end
+                  close(command)
+
+                  print month_end "/" day_end "/" year_end " -> " time_end " " summary
+               }
             }
             else
             {
-               print month_start "/" day_start "/" year_start " " summary
+               if (european_format)
+               {
+                  print day_start "/" month_start "/" year_start " " hour_start ":" minute_start "-" hour_end ":" minute_end " " summary
+               }
+               else
+               {
+                  command = date_command " -d " hour_start ":" minute_start " +%I:%M%p"
+                  command | getline time_start
+                  close(command)
+
+                  command = date_command " -d " hour_end ":" minute_end " +%I:%M%p"
+                  command | getline time_end
+                  close(command)
+
+                  print month_start "/" day_start "/" year_start " " time_start "-" time_end " " summary
+               }
+            }
+         }
+         if (location != "")
+         {
+            if (european_format)
+            {
+               print "#"day_start "/" month_start "/" year_start" location: "location
+            }
+            else
+            {
+               print "#"month_start "/" day_start "/" year_start" location: "location
+            }
+         }
+         if (description != "")
+         {
+            if (european_format)
+            {
+               print "#"day_start "/" month_start "/" year_start" description: "description
+            }
+            else
+            {
+               print "#"month_start "/" day_start "/" year_start" description: "description
             }
          }
       }
-   }
-   else
-   {
-      if (date_start < date_end) 
+
+      # calculate repeating events
+      if (repeating_event == 0)
       {
-         # first date with start time
-         if (european_format)
-         {
-            print day_start "/" month_start "/" year_start " " hour_start ":" minute_start " -> " summary
-         }
-         else
-         {
-            command = date_command " -d " hour_start ":" minute_start " +%I:%M%p"
-            command | getline time_start
-            close(command)
+         repeat = 0
+      }
+      else
+      {
+         num_repetitions = num_repetitions + 1
 
-            print month_start "/" day_start "/" year_start " " time_start " -> " summary
-         }
-
-         #middle days without time
-         command = date_command  " -d \"" date_start " 1 day\"" " +%Y%m%d"
+         command = date_command  " -d \"" date_start_bak " " interval " " date_incr_str "\" " "+%Y%m%d"
          command | getline captureresult
          close(command)
-         date_next = captureresult
-         while (date_next < date_end)
+         date_start = captureresult
+         year_start = substr(captureresult, 1, 4)
+         month_start = substr(captureresult, 5, 2)
+         day_start = substr(captureresult, 7, 2)
+
+         command = date_command  " -d \"" date_end_bak " " interval " " date_incr_str "\" " "+%Y%m%d"
+         command | getline captureresult
+         close(command)
+         date_end = captureresult
+         year_end = substr(captureresult, 1, 4)
+         month_end = substr(captureresult, 5, 2)
+         day_end = substr(captureresult, 7, 2)
+
+         if (repeating_end_date != "" && date_start > repeating_end_date)
          {
-            tmp_year_next = substr(date_next, 1, 4)
-            tmp_month_next = substr(date_next, 5, 2)
-            tmp_day_next = substr(date_next, 7, 2)
-
-            if (european_format)
-            {
-               print tmp_day_next "/" tmp_month_next "/" tmp_year_next " " summary
-            }
-            else
-            {
-               print tmp_month_next "/" tmp_day_next "/" tmp_year_next " " summary
-            }
-
-            command = date_command " -d \"" date_next " 1 day\"" " +%Y%m%d"
-            command | getline captureresult
-            close(command)
-            date_next = captureresult
-         }
-
-         # last day with end time
-         if (european_format)
-         {
-            print day_end "/" month_end "/" year_end " -> " hour_end ":" minute_end " " summary
-         }
-         else
-         {
-            command = date_command " -d " hour_end ":" minute_end " +%I:%M%p"
-            command | getline time_end
-            close(command)
-
-            print month_end "/" day_end "/" year_end " -> " time_end " " summary
-         }
-      }
-      else
-      {
-         if (european_format)
-         {
-            print day_start "/" month_start "/" year_start " " hour_start ":" minute_start "-" hour_end ":" minute_end " " summary
-         }
-         else
-         {
-            command = date_command " -d " hour_start ":" minute_start " +%I:%M%p"
-            command | getline time_start
-            close(command)
-
-            command = date_command " -d " hour_end ":" minute_end " +%I:%M%p"
-            command | getline time_end
-            close(command)
-
-            print month_start "/" day_start "/" year_start " " time_start "-" time_end " " summary
+            repeat = 0
          }
       }
    }
-   if (location != "")
-   {
-      if (european_format)
-      {
-         print "#"day_start "/" month_start "/" year_start" location: "location
-      }
-      else
-      {
-         print "#"month_start "/" day_start "/" year_start" location: "location
-      }
-   }
-   if (description != "")
-   {
-      if (european_format)
-      {
-         print "#"day_start "/" month_start "/" year_start" description: "description
-      }
-      else
-      {
-         print "#"month_start "/" day_start "/" year_start" description: "description
-      }
-   }
+
    print "#### END EVENT -------------------------------------\n"
 }
 
 END {
 
-}' > $output 
+}' > "$output" 
 
 
