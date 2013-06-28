@@ -1,6 +1,6 @@
-#!/bin/bash 
+#!/bin/bash
 
-# Copyright (c) 2010 Jörg Kühne <jk-ical2pcal at gmx dot de> 
+# Copyright (c) 2010 Jörg Kühne <jk-ical2pcal at gmx dot de>
 # Copyright (c) 2008 Francisco José Marín Pérez <pacogeek at gmail dot com>
 
 # All rights reserved. (The Mit License)
@@ -24,6 +24,9 @@
 #THE SOFTWARE.
 
 # Changes from Jörg Kühne
+#v0.0.5
+# - support of changed single events in a series of repeating events
+
 #v0.0.4
 # - support of excluded dates in a simple series of repeating events
 
@@ -48,21 +51,9 @@ GNU_DATE_COMMAND=""
 # ----------------------------------------------------------------------
 # Code starts here
 
-if [ -z "$GNU_DATE_COMMAND" ]; then
-   GNU_DATE_COMMAND=date
-fi
-
-# check date command for gnu version
-TEST_DATE=`"$GNU_DATE_COMMAND" -d 20100101 +%Y%m%d`
-if [ "x$TEST_DATE" != "x20100101" ]; then
-   echo "Gnu version of date command not found. Please set correct config value."
-   echo " "
-   exit 1
-fi
-
-help() { # Show the help 
+help() { # Show the help
    cat << EOF
-ical2pcal v0.0.4 - Convert iCalendar (.ics) data files to pcal data files
+ical2pcal v0.0.5 - Convert iCalendar (.ics) data files to pcal data files
 
 Usage:   ical2pcal  [-E] [-o <file>] [-h] file
 
@@ -72,21 +63,22 @@ Usage:   ical2pcal  [-E] [-o <file>] [-h] file
 
          -h Display this help
 
-The iCalendar format (.ics file extension) is a standard (RFC 2445) for
-calendar data exchange. Programs that support the iCalendar format are: Google
-Calendar, Apple iCal, Evolution, Orange, etc.
+The iCalendar format (.ics file extension) is a standard (RFC 2445)
+for calendar data exchange. Programs that support the iCalendar format
+are: Google Calendar, Apple iCal, Evolution, Orange, etc.
 
-The iCalendar format have many objects like events, to-do lists, alarms,
-journal entries etc. ical2pcal only use the events in the file showing in the
-pcal file the summary and the time of the event, the rest information of the
-event like description or location are commented in the pcal file (because
+The iCalendar format have many objects like events, to-do lists,
+alarms, journal entries etc. ical2pcal only use the events
+in the file showing in the pcal file the summary and the time of
+the event, the rest information of the event like
+description or location are commented in the pcal file (because
 usually this information does not fit in the day box).
 
-Currently automatic detection and conversion to local time of time values in
-UTC is implemented. All other time values are assumed as local times.
+Currently automatic detection and conversion to local time of time values
+in UTC is implemented. All other time values are assumed as local times.
 
-ical2pcal does not support complex repeating events, like every first sunday in
-month. Only simple recurrence are allowed like:
+ical2pcal does not support complex repeating events, like every first sunday in month.
+Only simple recurrence are allowed like:
 every n-th [day|week|month|year] from <DATE> until <DATE> except <DATE>,...
 
 EOF
@@ -103,7 +95,7 @@ do
 
       o) output="$OPTARG";;
 
-      h) help 
+      h) help
          exit 0;;
 
       ?) help
@@ -119,28 +111,170 @@ then
    exit 0
 fi
 
-cat "$*" |
-awk '
-BEGIN{
-   RS = ""
-}
+if [ -z "$GNU_DATE_COMMAND" ]; then
+   GNU_DATE_COMMAND=date
+fi
+
+# check date command for gnu version
+TEST_DATE=`"$GNU_DATE_COMMAND" -d 20100101 +%Y%m%d`
+if [ "x$TEST_DATE" != "x20100101" ]; then
+   echo "Gnu version of date command not found. Please set correct config value."
+   echo " "
+   exit 1
+fi
 
 {
-   gsub(/\r/,"",$0) # Remove the Windows style line ending 
-   gsub(/\f/,"",$0) # Remove the Windows style line ending 
-   gsub(/\n /,"", $0) # Unfold the lines
-   gsub(/\\\\/,"\\",$0)
-   gsub(/\\,/,",",$0)
-   gsub(/\\;/,";",$0)
-   gsub(/\\n/," ",$0)
-   gsub(/\\N/," ",$0)
-   print
-}' |
-awk -v european_format=$european_format -v date_command="$GNU_DATE_COMMAND" '
+  cat "$*" |
+  awk '
+  BEGIN{
+     RS = ""
+  }
+  
+  {
+     gsub(/\r/,"",$0) # Remove the Windows style line ending
+     gsub(/\f/,"",$0) # Remove the Windows style line ending
+     gsub(/\n /,"", $0) # Unfold the lines
+     gsub(/\\\\/,"\\",$0)
+     gsub(/\\,/,",",$0)
+     gsub(/\\;/,";",$0)
+     gsub(/\\n/," ",$0)
+     gsub(/\\N/," ",$0)
+     print
+  }' | 
+  awk -v date_command="$GNU_DATE_COMMAND" '
+  BEGIN {
+     FS = ":" #field separator
+     print "BEGIN:RECURRENCES"
+  }
+  
+  $0 ~ /^BEGIN:VEVENT/ {
+     recurrence = 0
+     all_day_event = 0
+     summary = ""
+     utc_time = 0
+     recurrence_date = ""
+     uid = ""
+  
+     while ($0 !~ /^END:VEVENT/)
+     {
+        if ($1 ~ /^RECURRENCE-ID/)
+        {
+           year = substr($2, 1, 4)
+           month = substr($2, 5, 2)
+           day = substr($2, 7, 2)
+  
+           if ($1 ~ /VALUE=DATE/)
+           {
+              all_day_event = 1
+           }
+           else
+           {
+              hour = substr($2, 10, 2)
+              minute = substr($2, 12, 2)
+              UTCTAG = substr($2, 16, 1)
+  
+              if (UTCTAG == "Z")
+              {
+                 utc_time = 1
+              }
+           }
+  
+           recurrence = 1
+        }
+  
+        if ($1 ~ /^SUMMARY/)
+        {
+           sub(/SUMMARY/,"",$0)
+           sub(/^:/,"",$0)
+           summary = $0
+        }
+  
+        if ($1 ~ /^UID/)
+        {
+           sub(/UID/,"",$0)
+           sub(/^:/,"",$0)
+           uid = $0
+        }
+  
+        getline
+     }
+  
+     if ( recurrence )
+     {
+        if (! all_day_event && utc_time)
+        {
+           # Convert Date/Time from UTC to local time
+  
+           tmp_date = year month day "UTC" hour minute
+           command = date_command " -d" tmp_date " +%Y%m%d%H%M"
+           command | getline captureresult
+           close(command)
+           year = substr(captureresult, 1, 4)
+           month = substr(captureresult, 5, 2)
+           day = substr(captureresult, 7, 2)
+           hour = substr(captureresult, 9, 2)
+           minute = substr(captureresult, 11, 2)
+        }
+  
+        if (all_day_event)
+        {
+           recurrence_date = year month day
+        }
+        else
+        {
+           recurrence_date = year month day hour minute
+        }
+  
+        print "RECURRENCE_ENTRY:" uid ":" recurrence_date ":" summary
+     }
+  }
+  
+  END {
+     print "END:RECURRENCES"
+  }'
+
+  cat "$*" |
+  awk '
+  BEGIN{
+     RS = ""
+  }
+  
+  {
+     gsub(/\r/,"",$0) # Remove the Windows style line ending
+     gsub(/\f/,"",$0) # Remove the Windows style line ending
+     gsub(/\n /,"", $0) # Unfold the lines
+     gsub(/\\\\/,"\\",$0)
+     gsub(/\\,/,",",$0)
+     gsub(/\\;/,";",$0)
+     gsub(/\\n/," ",$0)
+     gsub(/\\N/," ",$0)
+     print
+  }'
+  
+} | awk -v european_format=$european_format -v date_command="$GNU_DATE_COMMAND" '
 BEGIN {
    FS = ":" #field separator
    print "# Creator: ical2pcal"
-   print "# include this file into your .calendar file with: include \"a_file.pcal\"\n" 
+   print "# include this file into your .calendar file with: include \"a_file.pcal\"\n"
+}
+
+$0 ~ /^BEGIN:RECURRENCES/ {
+   recurrence_index = 0
+   print "#Replaced events in event series:"
+
+   while ($0 !~ /^END:RECURRENCES/)
+   {
+      if ($1 ~ /^RECURRENCE_ENTRY/)
+      {
+         recurrences[recurrence_index] = $2 ":" $3
+         recurrence_index = recurrence_index + 1
+         print "#" $1 ":" $3 ":" substr($0, index($0,$4))
+      }
+
+      getline
+   }
+
+   print ""
 }
 
 $0 ~ /^BEGIN:VEVENT/ {
@@ -149,6 +283,8 @@ $0 ~ /^BEGIN:VEVENT/ {
    summary = ""
    location = ""
    description = ""
+   uid = ""
+   recurence_reference_date = ""
 
    repeat = 1
    repeating_event = 0
@@ -173,9 +309,9 @@ $0 ~ /^BEGIN:VEVENT/ {
          month_start = substr($2, 5, 2)
          day_start = substr($2, 7, 2)
 
-         if ($1 ~ /VALUE=DATE/) 
+         if ($1 ~ /VALUE=DATE/)
          {
-            all_day_event = 1 
+            all_day_event = 1
          }
          else
          {
@@ -196,9 +332,9 @@ $0 ~ /^BEGIN:VEVENT/ {
          month_end = substr($2, 5, 2)
          day_end = substr($2, 7, 2)
 
-         if ($1 ~ /VALUE=DATE/) 
+         if ($1 ~ /VALUE=DATE/)
          {
-            all_day_event = 1 
+            all_day_event = 1
          }
          else
          {
@@ -226,6 +362,13 @@ $0 ~ /^BEGIN:VEVENT/ {
          sub(/DESCRIPTION/,"",$0)
          sub(/^:/,"",$0)
          description = $0
+      }
+
+      if ($1 ~ /^UID/)
+      {
+         sub(/UID/,"",$0)
+         sub(/^:/,"",$0)
+         uid = $0
       }
 
       if ($1 ~ /^RRULE/)
@@ -321,7 +464,7 @@ $0 ~ /^BEGIN:VEVENT/ {
                close(command)
                year_exdate = substr(captureresult, 1, 4)
                month_exdate = substr(captureresult, 5, 2)
-               day_exdate = substr(captureresult, 7, 2)               
+               day_exdate = substr(captureresult, 7, 2)
             }
 
             tmp_exdate = year_exdate month_exdate day_exdate
@@ -336,7 +479,7 @@ $0 ~ /^BEGIN:VEVENT/ {
    if (! all_day_event && utc_time)
    {
       # Convert Date/Time from UTC to local time
-      
+
       tmp_date_start = year_start month_start day_start "UTC" hour_start minute_start
       command = date_command " -d" tmp_date_start " +%Y%m%d%H%M"
       command | getline captureresult
@@ -407,7 +550,29 @@ $0 ~ /^BEGIN:VEVENT/ {
             exdate = 1
             break
          }
-      }      
+      }
+
+      if (exdate == 0 && repeating_event)
+      {
+         if (! all_day_event)
+         {
+            recurence_reference_date = year_start month_start day_start hour_start minute_start
+         }
+         else
+         {
+            recurence_reference_date = year_start month_start day_start
+         }
+
+         for (i in recurrences)
+         {
+            if (recurrences[i] == uid ":" recurence_reference_date)
+            {
+               exdate = 1
+               print "#skip event due to modified series element: " uid ":" recurence_reference_date
+               break
+            }
+         }
+      }
 
       if (exdate == 0)
       {
@@ -427,7 +592,7 @@ $0 ~ /^BEGIN:VEVENT/ {
             }
             else
             {
-               if (date_start < date_end) 
+               if (date_start < date_end)
                {
                   date_next = date_start
                   while (date_next < date_end)
@@ -467,7 +632,7 @@ $0 ~ /^BEGIN:VEVENT/ {
          }
          else
          {
-            if (date_start < date_end) 
+            if (date_start < date_end)
             {
                # first date with start time
                if (european_format)
@@ -604,6 +769,4 @@ $0 ~ /^BEGIN:VEVENT/ {
 
 END {
 
-}' > "$output" 
-
-
+}' > "$output"
