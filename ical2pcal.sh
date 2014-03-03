@@ -24,6 +24,10 @@
 #THE SOFTWARE.
 
 # Changes from Jörg Kühne
+#v0.0.6
+# - correct handling of repeating events with count condition
+# - better display of events that have equal start and end time
+
 #v0.0.5
 # - support of changed single events in a series of repeating events
 
@@ -53,7 +57,7 @@ GNU_DATE_COMMAND=""
 
 help() { # Show the help
    cat << EOF
-ical2pcal v0.0.5 - Convert iCalendar (.ics) data files to pcal data files
+ical2pcal v0.0.6 - Convert iCalendar (.ics) data files to pcal data files
 
 Usage:   ical2pcal  [-E] [-o <file>] [-h] file
 
@@ -129,7 +133,7 @@ fi
   BEGIN{
      RS = ""
   }
-  
+
   {
      gsub(/\r/,"",$0) # Remove the Windows style line ending
      gsub(/\f/,"",$0) # Remove the Windows style line ending
@@ -140,13 +144,13 @@ fi
      gsub(/\\n/," ",$0)
      gsub(/\\N/," ",$0)
      print
-  }' | 
+  }' |
   awk -v date_command="$GNU_DATE_COMMAND" '
   BEGIN {
      FS = ":" #field separator
      print "BEGIN:RECURRENCES"
   }
-  
+
   $0 ~ /^BEGIN:VEVENT/ {
      recurrence = 0
      all_day_event = 0
@@ -154,7 +158,7 @@ fi
      utc_time = 0
      recurrence_date = ""
      uid = ""
-  
+
      while ($0 !~ /^END:VEVENT/)
      {
         if ($1 ~ /^RECURRENCE-ID/)
@@ -162,7 +166,7 @@ fi
            year = substr($2, 1, 4)
            month = substr($2, 5, 2)
            day = substr($2, 7, 2)
-  
+
            if ($1 ~ /VALUE=DATE/)
            {
               all_day_event = 1
@@ -172,39 +176,39 @@ fi
               hour = substr($2, 10, 2)
               minute = substr($2, 12, 2)
               UTCTAG = substr($2, 16, 1)
-  
+
               if (UTCTAG == "Z")
               {
                  utc_time = 1
               }
            }
-  
+
            recurrence = 1
         }
-  
+
         if ($1 ~ /^SUMMARY/)
         {
            sub(/SUMMARY/,"",$0)
            sub(/^:/,"",$0)
            summary = $0
         }
-  
+
         if ($1 ~ /^UID/)
         {
            sub(/UID/,"",$0)
            sub(/^:/,"",$0)
            uid = $0
         }
-  
+
         getline
      }
-  
+
      if ( recurrence )
      {
         if (! all_day_event && utc_time)
         {
            # Convert Date/Time from UTC to local time
-  
+
            tmp_date = year month day "UTC" hour minute
            command = date_command " -d" tmp_date " +%Y%m%d%H%M"
            command | getline captureresult
@@ -215,7 +219,7 @@ fi
            hour = substr(captureresult, 9, 2)
            minute = substr(captureresult, 11, 2)
         }
-  
+
         if (all_day_event)
         {
            recurrence_date = year month day
@@ -224,11 +228,11 @@ fi
         {
            recurrence_date = year month day hour minute
         }
-  
+
         print "RECURRENCE_ENTRY:" uid ":" recurrence_date ":" summary
      }
   }
-  
+
   END {
      print "END:RECURRENCES"
   }'
@@ -238,7 +242,7 @@ fi
   BEGIN{
      RS = ""
   }
-  
+
   {
      gsub(/\r/,"",$0) # Remove the Windows style line ending
      gsub(/\f/,"",$0) # Remove the Windows style line ending
@@ -250,7 +254,7 @@ fi
      gsub(/\\N/," ",$0)
      print
   }'
-  
+
 } | awk -v european_format=$european_format -v date_command="$GNU_DATE_COMMAND" '
 BEGIN {
    FS = ":" #field separator
@@ -290,7 +294,7 @@ $0 ~ /^BEGIN:VEVENT/ {
    repeating_event = 0
    frequency =""
    interval = 1
-   max_num_repetitions = 750
+   count = 0
    repeating_end_date = ""
    date_incr_str = "week"
    debug_repeat_str = ""
@@ -393,6 +397,11 @@ $0 ~ /^BEGIN:VEVENT/ {
                   interval = subpart[2]
                }
 
+               if (subpart[1] ~ /COUNT/)
+               {
+                  count = subpart[2]
+               }
+
                if (subpart[1] ~ /UNTIL/)
                {
                   until_year = substr(subpart[2], 1, 4)
@@ -421,26 +430,38 @@ $0 ~ /^BEGIN:VEVENT/ {
          if (frequency == "DAILY")
          {
             repeating_event = 1
-            max_num_repetitions = 750
             date_incr_str = "day"
+            if (count == 0)
+            {
+               count = 750
+            }
          }
          if (frequency == "WEEKLY")
          {
             repeating_event = 1
-            max_num_repetitions = 260
             date_incr_str = "week"
+            if (count == 0)
+            {
+               count = 260
+            }
          }
          if (frequency == "MONTHLY")
          {
             repeating_event = 1
-            max_num_repetitions = 60
             date_incr_str = "month"
+            if (count == 0)
+            {
+               count = 60
+            }
          }
          if (frequency == "YEARLY")
          {
             repeating_event = 1
-            max_num_repetitions = 5
             date_incr_str = "year"
+            if (count == 0)
+            {
+               count = 5
+            }
          }
       }
 
@@ -474,6 +495,11 @@ $0 ~ /^BEGIN:VEVENT/ {
       }
 
       getline
+   }
+
+   if (count == 0)
+   {
+      count = 1
    }
 
    if (! all_day_event && utc_time)
@@ -523,6 +549,7 @@ $0 ~ /^BEGIN:VEVENT/ {
    }
 
    print "#### BEGIN EVENT -----------------------------------"
+
    if (debug_repeat_str != "")
    {
       print "#"debug_repeat_str
@@ -536,7 +563,7 @@ $0 ~ /^BEGIN:VEVENT/ {
    }
 
    num_repetitions = 0
-   while (repeat == 1 && num_repetitions < max_num_repetitions)
+   while (repeat == 1 && num_repetitions < count)
    {
       date_start_bak = date_start
       date_end_bak = date_end
@@ -583,11 +610,11 @@ $0 ~ /^BEGIN:VEVENT/ {
             {
                if (european_format)
                {
-               print day_start "/" month_start "/" year_start " " summary
+                  print day_start "/" month_start "/" year_start " " summary
                }
                else
                {
-               print month_start "/" day_start "/" year_start " " summary
+                  print month_start "/" day_start "/" year_start " " summary
                }
             }
             else
@@ -603,11 +630,11 @@ $0 ~ /^BEGIN:VEVENT/ {
 
                      if (european_format)
                      {
-                     print tmp_day_next "/" tmp_month_next "/" tmp_year_next " " summary
+                        print tmp_day_next "/" tmp_month_next "/" tmp_year_next " " summary
                      }
                      else
                      {
-                     print tmp_month_next "/" tmp_day_next "/" tmp_year_next " " summary
+                        print tmp_month_next "/" tmp_day_next "/" tmp_year_next " " summary
                      }
 
                      command = date_command  " -d \"" date_next " 1 day\"" " +%Y%m%d"
@@ -641,7 +668,7 @@ $0 ~ /^BEGIN:VEVENT/ {
                }
                else
                {
-                  command = date_command " -d " hour_start ":" minute_start " +%I:%M%p"
+                  command = date_command " -d " hour_start ":" minute_start " +%I:%M%P"
                   command | getline time_start
                   close(command)
 
@@ -681,7 +708,7 @@ $0 ~ /^BEGIN:VEVENT/ {
                }
                else
                {
-                  command = date_command " -d " hour_end ":" minute_end " +%I:%M%p"
+                  command = date_command " -d " hour_end ":" minute_end " +%I:%M%P"
                   command | getline time_end
                   close(command)
 
@@ -692,19 +719,33 @@ $0 ~ /^BEGIN:VEVENT/ {
             {
                if (european_format)
                {
-                  print day_start "/" month_start "/" year_start " " hour_start ":" minute_start "-" hour_end ":" minute_end " " summary
+                  if (hour_start == hour_end && minute_start == minute_end)
+                  {
+                     print day_start "/" month_start "/" year_start " " hour_start ":" minute_start " " summary
+                  }
+                  else
+                  {
+                     print day_start "/" month_start "/" year_start " " hour_start ":" minute_start "-" hour_end ":" minute_end " " summary
+                  }
                }
                else
                {
-                  command = date_command " -d " hour_start ":" minute_start " +%I:%M%p"
+                  command = date_command " -d " hour_start ":" minute_start " +%I:%M%P"
                   command | getline time_start
                   close(command)
 
-                  command = date_command " -d " hour_end ":" minute_end " +%I:%M%p"
+                  command = date_command " -d " hour_end ":" minute_end " +%I:%M%P"
                   command | getline time_end
                   close(command)
 
-                  print month_start "/" day_start "/" year_start " " time_start "-" time_end " " summary
+                  if (time_start == time_end)
+                  {
+                     print month_start "/" day_start "/" year_start " " time_start " " summary
+                  }
+                  else
+                  {
+                     print month_start "/" day_start "/" year_start " " time_start "-" time_end " " summary
+                  }
                }
             }
          }
