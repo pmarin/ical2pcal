@@ -1,4 +1,4 @@
-ical2pcal v0.0.5 - Convert iCalendar (.ics) data files to pcal data files
+ical2pcal v0.0.6 - Convert iCalendar (.ics) data files to pcal data files
 
 Usage:   ical2pcal  [-E] [-o <file>] [-h] file
 
