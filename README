@@ -1,4 +1,4 @@
-ical2pcal v0.0.6 - Convert iCalendar (.ics) data files to pcal data files
+ical2pcal v0.0.7 - Convert iCalendar (.ics) data files to pcal data files
 
 Usage:   ical2pcal  [-E] [-o <file>] [-h] file
 
@@ -24,5 +24,5 @@ in UTC is implemented. All other time values are assumed as local times.
 
 ical2pcal does not support complex repeating events, like every first sunday in month.
 Only simple recurrence are allowed like:
-every n-th [day|week|month|year] from <DATE> until <DATE> except <DATE>,...
+every n-th [day|week|month|year] from <DATE> [until <DATE> | count] except <DATE>,...
 

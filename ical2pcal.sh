@@ -24,6 +24,10 @@
 #THE SOFTWARE.
 
 # Changes from Jörg Kühne
+
+#v0.0.7
+# - fix handling of events without end time
+
 #v0.0.6
 # - correct handling of repeating events with count condition
 # - better display of events that have equal start and end time
@@ -57,7 +61,7 @@ GNU_DATE_COMMAND=""
 
 help() { # Show the help
    cat << EOF
-ical2pcal v0.0.6 - Convert iCalendar (.ics) data files to pcal data files
+ical2pcal v0.0.7 - Convert iCalendar (.ics) data files to pcal data files
 
 Usage:   ical2pcal  [-E] [-o <file>] [-h] file
 
@@ -283,6 +287,8 @@ $0 ~ /^BEGIN:RECURRENCES/ {
 
 $0 ~ /^BEGIN:VEVENT/ {
    all_day_event = 0
+   no_start_date = 1
+   no_end_date = 1
    utc_time = 0
    summary = ""
    location = ""
@@ -328,6 +334,8 @@ $0 ~ /^BEGIN:VEVENT/ {
                utc_time = 1
             }
          }
+         
+         no_start_date = 0
       }
 
       if ($1 ~ /^DTEND/)
@@ -345,6 +353,8 @@ $0 ~ /^BEGIN:VEVENT/ {
             hour_end = substr($2, 10, 2)
             minute_end = substr($2, 12, 2)
          }
+         
+         no_end_date = 0
       }
 
       if ($1 ~ /^SUMMARY/)
@@ -500,6 +510,21 @@ $0 ~ /^BEGIN:VEVENT/ {
    if (count == 0)
    {
       count = 1
+   }
+   
+   if (no_start_date == 1)
+   {
+      next
+   }
+   
+   if (no_end_date == 1)
+   {  
+      # event only with start time
+      year_end = year_start
+      month_end = month_start
+      day_end = day_start
+      hour_end = hour_start
+      minute_end = minute_start
    }
 
    if (! all_day_event && utc_time)
